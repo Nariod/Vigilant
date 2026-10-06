@@ -13,7 +13,6 @@ build-options:
 
 finish-args:
   - --share=ipc
-  - --socket=fallback-x11
   - --device=dri
   - --socket=wayland
 

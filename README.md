@@ -6,6 +6,7 @@ Application de prise de notes **temporaires et chiffrées**, distribuée **uniqu
 
 - **Aucune écriture disque** : les notes vivent exclusivement en mémoire (RAM).
 - **Chiffrement ChaCha20-Poly1305** : chaque note est scellée sous une clé de session aléatoire, non persistée.
+- **Mémoire verrouillée** (`mlockall`) : les pages du processus ne peuvent pas partir en swap, clé de session incluse.
 - **Session unique** : à la fermeture de l'application, tout est détruit — clés et textes en clair sont *zéroïsés*.
 - **Core dumps désactivés** (`RLIMIT_CORE=0`) : aucun fichier core ne peut être écrit en cas de crash.
 - **Sandbox Flatpak sans accès disque persistant** : aucun système de fichiers hors `/app` et XDG config.
@@ -24,8 +25,9 @@ Le menu ⚙ de l'application propose :
 
 Le contenu des notes est chiffré en mémoire (ChaCha20-Poly1305, clé de
 session non persistée). Si le noyau place des pages du processus en swap,
-elles contiennent des ciphertexts, pas du texte en clair : un attaquant
-ayant accès au disque ne peut rien en lire.
+elles ne quittent jamais la RAM : les pages du processus sont verrouillées
+par `mlockall`, y compris la clé de session. En cas d'échec du verrouillage
+(affiché sur stderr), le chiffrement en mémoire reste la seconde ligne de défense.
 
 ### Captures d'écran : limite connue
 
