@@ -21,7 +21,7 @@ modules:
   - name: vigilant
     buildsystem: simple
     build-commands:
-      - cargo build --release
+      - cargo --offline build --release
       - install -Dm755 target/release/vigilant /app/bin/vigilant
       - install -Dm644 data/io.github.nariod.Vigilant.desktop /app/share/applications/io.github.nariod.Vigilant.desktop
       - install -Dm644 data/io.github.nariod.Vigilant.metainfo.xml /app/share/metainfo/io.github.nariod.Vigilant.metainfo.xml
