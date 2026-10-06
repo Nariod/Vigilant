@@ -47,8 +47,23 @@ fn lock_memory() {
     if !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT)
         && !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE)
     {
-        eprintln!("warning: could not lock memory; sensitive pages may be swapped");
+        eprintln!(
+            "warning: could not lock memory (errno {}, memlock soft limit {} bytes); sensitive pages may be swapped",
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+            memlock_soft_limit()
+        );
     }
+}
+
+fn memlock_soft_limit() -> libc::rlim_t {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut limit) } != 0 {
+        return 0;
+    }
+    limit.rlim_cur
 }
 
 fn mlockall_with(flags: libc::c_int) -> bool {

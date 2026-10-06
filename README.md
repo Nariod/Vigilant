@@ -21,6 +21,32 @@ Le menu ⚙ de l'application propose :
 - un délai réglable de 1 à 480 minutes (10 par défaut) ;
 - un bouton « Effacer toutes les notes maintenant ».
 
+### Verrouillage mémoire : prérequis système
+
+`mlockall` ne peut réussir que si la limite `RLIMIT_MEMLOCK` le permet.
+Un processus non privilégié peut élever sa soft limit jusqu'à sa hard
+limit, mais pas au-delà. Sur Fedora, la valeur par défaut est 8192 KiB —
+insuffisant pour un processus GTK4. Vérifiez votre configuration :
+
+```bash
+ulimit -l
+```
+
+Pour élever la limite au niveau de la session (systemd), créez un drop-in :
+
+```bash
+sudo systemctl edit --user   # ou éditer /etc/systemd/system.conf.d/
+```
+
+```ini
+[Manager]
+DefaultLimitMEMLOCK=infinity
+```
+
+Puis reconnectez-vous. Sans cela, Vigilant affiche un avertissement au
+lancement et le chiffrement en mémoire reste la seule protection contre
+l'analyse du swap.
+
 ### Swap : les données restent chiffrées
 
 Le contenu des notes est chiffré en mémoire (ChaCha20-Poly1305, clé de
