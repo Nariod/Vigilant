@@ -167,14 +167,14 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
 fn connect_wipe_switch(state: Rc<App>, wipe_switch: &gtk::Switch) {
     wipe_switch.connect_state_notify(move |switch| {
         state.auto_wipe_enabled.set(switch.is_active());
-        schedule_auto_wipe(state);
+        schedule_auto_wipe(&state);
     });
 }
 
 fn connect_timer_row(state: Rc<App>, timer_row: &adw::SpinRow) {
     timer_row.connect_changed(move |row| {
         state.auto_wipe_minutes.set(row.value() as u32);
-        schedule_auto_wipe(state);
+        schedule_auto_wipe(&state);
     });
 }
 
@@ -219,8 +219,8 @@ fn build_empty_label() -> gtk::Label {
 
 fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: &gtk::TextView) {
     save_btn.connect_clicked(move |_btn| {
-        let buffer = input.buffer();
-        let (start, end) = (buffer.start_iter(), buffer.end_iter());
+        let mut buffer = input.buffer();
+        let (mut start, mut end) = (buffer.start_iter(), buffer.end_iter());
         let mut text = buffer.text(&start, &end, false).to_string();
         if text.trim().is_empty() {
             return;
