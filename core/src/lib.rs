@@ -102,6 +102,27 @@ impl NoteStore {
     pub fn is_empty(&self) -> bool {
         self.sealed.is_empty()
     }
+
+    pub fn search(&self, query: &str) -> Vec<String> {
+        let needle = query.to_lowercase();
+        if needle.is_empty() {
+            return self.ids();
+        }
+        self.ids()
+            .into_iter()
+            .filter(|id| self.matches(id, &needle))
+            .collect()
+    }
+
+    fn matches(&self, id: &str, needle: &str) -> bool {
+        self.get(id)
+            .map(|content| content.to_lowercase().contains(needle))
+            .unwrap_or(false)
+    }
+
+    pub fn clear(&mut self) {
+        self.sealed.clear();
+    }
 }
 
 impl Default for NoteStore {
@@ -171,5 +192,30 @@ mod tests {
         store.put("b", "x").unwrap();
         store.put("a", "y").unwrap();
         assert_eq!(store.ids(), vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn search_matches_case_insensitive() {
+        let mut store = NoteStore::new();
+        store.put("a", "Mot de Passe bancaire").unwrap();
+        store.put("b", "liste de courses").unwrap();
+        assert_eq!(store.search("mot de passe"), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn empty_query_returns_all_ids() {
+        let mut store = NoteStore::new();
+        store.put("a", "x").unwrap();
+        store.put("b", "y").unwrap();
+        assert_eq!(store.search("").len(), 2);
+    }
+
+    #[test]
+    fn clear_removes_everything() {
+        let mut store = NoteStore::new();
+        store.put("a", "secret").unwrap();
+        store.clear();
+        assert!(store.is_empty());
+        assert_eq!(store.get("a"), Err(StoreError::NotFound));
     }
 }
