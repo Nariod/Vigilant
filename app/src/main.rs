@@ -43,9 +43,32 @@ fn disable_core_dumps() {
 }
 
 fn lock_memory() {
+    raise_memlock_limit();
     let flags = libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT;
     if unsafe { libc::mlockall(flags) } != 0 {
-        eprintln!("warning: could not lock memory; sensitive pages may be swapped");
+        let flags = libc::MCL_CURRENT | libc::MCL_FUTURE;
+        if unsafe { libc::mlockall(flags) } != 0 {
+            eprintln!("warning: could not lock memory; sensitive pages may be swapped");
+        }
+    }
+}
+
+fn raise_memlock_limit() {
+    let mut limit = libc::rlimit {
+        rlim_cur: libc::RLIM_INFINITY,
+        rlim_max: libc::RLIM_INFINITY,
+    };
+    if unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) } == 0 {
+        return;
+    }
+    if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut limit) } != 0 {
+        return;
+    }
+    if limit.rlim_max == libc::RLIM_INFINITY {
+        limit.rlim_cur = libc::RLIM_INFINITY;
+        if unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) } != 0 {
+            eprintln!("warning: could not raise RLIMIT_MEMLOCK");
+        }
     }
 }
 
@@ -230,7 +253,7 @@ fn build_empty_label() -> gtk::Label {
 
 fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
     save_btn.connect_clicked(move |_btn| {
-        let mut buffer = input.buffer();
+        let buffer = input.buffer();
         let (mut start, mut end) = (buffer.start_iter(), buffer.end_iter());
         let text = Zeroizing::new(buffer.text(&start, &end, false).to_string());
         if text.trim().is_empty() {
