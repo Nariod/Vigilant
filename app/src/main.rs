@@ -107,7 +107,7 @@ fn build_ui(app: &adw::Application) {
     window.set_content(Some(&layout));
 
     build_settings_popover(&state, &settings_btn);
-    connect_save(state.clone(), &save_btn, &input);
+    connect_save(state.clone(), &save_btn, input.clone());
     connect_search(state.clone());
 
     refresh(&state);
@@ -217,7 +217,7 @@ fn build_empty_label() -> gtk::Label {
     label
 }
 
-fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: &gtk::TextView) {
+fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
     save_btn.connect_clicked(move |_btn| {
         let mut buffer = input.buffer();
         let (mut start, mut end) = (buffer.start_iter(), buffer.end_iter());
