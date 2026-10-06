@@ -159,29 +159,29 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
     content.append(&prefs_group);
     popover.set_child(Some(&content));
 
-    connect_wipe_switch(state, &wipe_switch);
-    connect_timer_row(state, &timer_row);
-    connect_wipe_now(state, &wipe_now_btn);
+    connect_wipe_switch(Rc::clone(state), &wipe_switch);
+    connect_timer_row(Rc::clone(state), &timer_row);
+    connect_wipe_now(Rc::clone(state), &wipe_now_btn);
 }
 
-fn connect_wipe_switch(state: &Rc<App>, wipe_switch: &gtk::Switch) {
+fn connect_wipe_switch(state: Rc<App>, wipe_switch: &gtk::Switch) {
     wipe_switch.connect_state_notify(move |switch| {
         state.auto_wipe_enabled.set(switch.is_active());
         schedule_auto_wipe(state);
     });
 }
 
-fn connect_timer_row(state: &Rc<App>, timer_row: &adw::SpinRow) {
+fn connect_timer_row(state: Rc<App>, timer_row: &adw::SpinRow) {
     timer_row.connect_changed(move |row| {
         state.auto_wipe_minutes.set(row.value() as u32);
         schedule_auto_wipe(state);
     });
 }
 
-fn connect_wipe_now(state: &Rc<App>, wipe_now_btn: &gtk::Button) {
+fn connect_wipe_now(state: Rc<App>, wipe_now_btn: &gtk::Button) {
     wipe_now_btn.connect_clicked(move |_btn| {
         state.store.borrow_mut().clear();
-        refresh(state);
+        refresh(&state);
     });
 }
 
@@ -191,10 +191,10 @@ fn schedule_auto_wipe(state: &Rc<App>) {
         return;
     }
     let seconds = state.auto_wipe_minutes.get().max(1) * 60;
-    let state = Rc::clone(state);
+    let timer_state = Rc::clone(state);
     let source = glib::timeout_add_seconds_local(seconds, move || {
-        state.store.borrow_mut().clear();
-        refresh(&state);
+        timer_state.store.borrow_mut().clear();
+        refresh(&timer_state);
         ControlFlow::Continue
     });
     state.auto_wipe_source.borrow_mut().replace(source);
