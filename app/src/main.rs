@@ -8,6 +8,8 @@ use std::rc::Rc;
 
 const APP_ID: &str = "io.github.nariod.Vigilant";
 const CORE_LIMIT_ZERO: libc::rlim_t = 0;
+const DEFAULT_WIPE_MINUTES: u32 = 10;
+const MAX_WIPE_MINUTES: u32 = 480;
 
 struct App {
     store: RefCell<vigilant_core::NoteStore>,
@@ -16,6 +18,9 @@ struct App {
     empty_label: gtk::Label,
     stack: gtk::Stack,
     next_id: std::cell::Cell<u64>,
+    auto_wipe_source: RefCell<Option<glib::SourceId>>,
+    auto_wipe_enabled: std::cell::Cell<bool>,
+    auto_wipe_minutes: std::cell::Cell<u32>,
 }
 
 fn main() -> glib::ExitCode {
@@ -51,6 +56,9 @@ fn build_ui(app: &adw::Application) {
         empty_label: build_empty_label(),
         stack: gtk::Stack::new(),
         next_id: std::cell::Cell::new(0),
+        auto_wipe_source: RefCell::new(None),
+        auto_wipe_enabled: std::cell::Cell::new(false),
+        auto_wipe_minutes: std::cell::Cell::new(DEFAULT_WIPE_MINUTES),
     });
 
     let input = gtk::TextView::builder()
@@ -88,17 +96,114 @@ fn build_ui(app: &adw::Application) {
     vbox.append(&input_group);
     vbox.append(&scrolled);
 
+    let header = adw::HeaderBar::new();
+    let settings_btn = gtk::MenuButton::new();
+    settings_btn.set_icon_name("settings-symbolic");
+    header.pack_end(&settings_btn);
+
     let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    layout.append(&adw::HeaderBar::new());
+    layout.append(&header);
     layout.append(&vbox);
     window.set_content(Some(&layout));
 
+    build_settings_popover(&state, &settings_btn);
     connect_save(state.clone(), &save_btn, &input);
     connect_search(state.clone());
-    start_auto_wipe(state.clone());
 
     refresh(&state);
     window.present();
+}
+
+fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
+    let popover = gtk::PopoverMenu::new();
+    settings_btn.set_popover(Some(&popover));
+
+    let wipe_switch = gtk::Switch::new();
+    wipe_switch.set_valign(gtk::Align::Center);
+
+    let wipe_row = adw::ActionRow::builder()
+        .title("Effacement automatique des notes")
+        .build();
+    wipe_row.add_suffix(&wipe_switch);
+
+    let adjustment = gtk::Adjustment::new(
+        DEFAULT_WIPE_MINUTES as f64,
+        1.0,
+        MAX_WIPE_MINUTES as f64,
+        1.0,
+        10.0,
+        0.0,
+    );
+    let timer_row = adw::SpinRow::new(Some(&adjustment), 1.0, 0);
+    timer_row.set_title("Délai (minutes)");
+
+    let wipe_now_btn = gtk::Button::with_label("Effacer");
+    wipe_now_btn.add_css_class("destructive-action");
+    wipe_now_btn.set_valign(gtk::Align::Center);
+
+    let wipe_now_row = adw::ActionRow::builder()
+        .title("Effacer toutes les notes maintenant")
+        .build();
+    wipe_now_row.add_suffix(&wipe_now_btn);
+
+    let prefs_group = adw::PreferencesGroup::new();
+    prefs_group.add(&wipe_row);
+    prefs_group.add(&timer_row);
+    prefs_group.add(&wipe_now_row);
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.append(&prefs_group);
+    popover.set_child(Some(&content));
+
+    connect_wipe_switch(state, &wipe_switch);
+    connect_timer_row(state, &timer_row);
+    connect_wipe_now(state, &wipe_now_btn);
+}
+
+fn connect_wipe_switch(state: &Rc<App>, wipe_switch: &gtk::Switch) {
+    wipe_switch.connect_state_notify(move |switch| {
+        state.auto_wipe_enabled.set(switch.is_active());
+        schedule_auto_wipe(state);
+    });
+}
+
+fn connect_timer_row(state: &Rc<App>, timer_row: &adw::SpinRow) {
+    timer_row.connect_changed(move |row| {
+        state.auto_wipe_minutes.set(row.value() as u32);
+        schedule_auto_wipe(state);
+    });
+}
+
+fn connect_wipe_now(state: &Rc<App>, wipe_now_btn: &gtk::Button) {
+    wipe_now_btn.connect_clicked(move |_btn| {
+        state.store.borrow_mut().clear();
+        refresh(state);
+    });
+}
+
+fn schedule_auto_wipe(state: &Rc<App>) {
+    cancel_auto_wipe(state);
+    if !state.auto_wipe_enabled.get() {
+        return;
+    }
+    let seconds = state.auto_wipe_minutes.get().max(1) * 60;
+    let state = Rc::clone(state);
+    let source = glib::timeout_add_seconds_local(seconds, move || {
+        state.store.borrow_mut().clear();
+        refresh(&state);
+        ControlFlow::Continue
+    });
+    state.auto_wipe_source.borrow_mut().replace(source);
+}
+
+fn cancel_auto_wipe(state: &Rc<App>) {
+    if let Some(source) = state.auto_wipe_source.borrow_mut().take() {
+        source.remove();
+    }
 }
 
 fn build_empty_label() -> gtk::Label {
@@ -130,38 +235,14 @@ fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: &gtk::TextView) {
 }
 
 fn connect_search(state: Rc<App>) {
-    state.search_entry.connect_search_changed(move |entry| {
+    state.search_entry.connect_search_changed(move |_| {
         refresh(&state);
-        let _ = entry;
     });
-}
-
-fn start_auto_wipe(state: Rc<App>) {
-    let minutes = auto_wipe_minutes_from_env();
-    if minutes == 0 {
-        return;
-    }
-    glib::timeout_add_seconds_local(minutes, move || {
-        state.store.borrow_mut().clear();
-        refresh(&state);
-        ControlFlow::Continue
-    });
-}
-
-fn auto_wipe_minutes_from_env() -> u32 {
-    std::env::var("VIGILANT_AUTO_WIPE_MINUTES")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0)
-}
-
-fn current_query(state: &Rc<App>) -> String {
-    state.search_entry.text().to_string()
 }
 
 fn refresh(state: &Rc<App>) {
     clear_rows(state);
-    let query = current_query(state);
+    let query = state.search_entry.text().to_string();
     let ids = state.store.borrow().search(&query);
     if ids.is_empty() {
         state.stack.set_visible_child(&state.empty_label);
@@ -201,7 +282,6 @@ fn append_note_row(state: &Rc<App>, id: &str) {
 }
 
 fn connect_delete_on_click(state: Rc<App>, row: &gtk::ListBoxRow, id: &str) {
-    let state = state;
     let id = id.to_string();
     row.connect_activate(move |_row| {
         let _ = state.store.borrow_mut().delete(&id);

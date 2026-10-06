@@ -11,25 +11,28 @@ Application de prise de notes **temporaires et chiffrées**, distribuée **uniqu
 - **Sandbox Flatpak sans accès disque persistant** : aucun système de fichiers hors `/app` et XDG config.
 - **UI GTK4 / libadwaita**, native GNOME, adaptée à Flatpak.
 
-### Auto-wipe (optionnel, désactivé par défaut)
+### Effacement automatique (optionnel, désactivé par défaut)
 
-L'application reste ouverte toute la journée sans rien effacer. Pour activer
-l'effacement automatique après N minutes d'existence des notes :
+Le menu ⚙ de l'application propose :
 
-```bash
-flatpak override --user --env=VIGILANT_AUTO_WIPE_MINUTES=10 io.github.nariod.Vigilant
-```
+- un interrupteur « Effacement automatique des notes » (désactivé par défaut ;
+  la fenêtre peut rester ouverte toute la journée sans rien effacer) ;
+- un délai réglable de 1 à 480 minutes (10 par défaut) ;
+- un bouton « Effacer toutes les notes maintenant ».
 
-`0` (valeur par défaut) = jamais d'effacement automatique.
+### Swap : les données restent chiffrées
 
-### Blocage des captures d'écran
+Le contenu des notes est chiffré en mémoire (ChaCha20-Poly1305, clé de
+session non persistée). Si le noyau place des pages du processus en swap,
+elles contiennent des ciphertexts, pas du texte en clair : un attaquant
+ayant accès au disque ne peut rien en lire.
 
-Sur **Wayland**, le compositeur contrôle les captures : GTK4 permet de
-marquer la surface comme *non-enregistreable* (`xdg_session_lock` /
-`constraint`), mais le comportement des outils de screenshot (noir vs
-capture ignorée) dépend du compositeur (GNOME, KDE, wlroots). Sur Wayland
-pur, la fuite de contenu par capture d'écran système est de toute façon
-limitée à l'utilisateur lui-même. Sur X11, cette protection n'existe pas.
+### Captures d'écran : limite connue
+
+Vigilant ne peut pas garantir qu'une capture d'écran soit noircie. Sur
+Wayland, c'est le compositeur qui décide ; sur X11, n'importe quelle
+application peut capturer l'écran. Ne considérez pas les captures comme
+impossibles : c'est une limite documentée, volontairement.
 
 ## Structure du projet
 
