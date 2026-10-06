@@ -6,20 +6,18 @@
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},
-    ChaCha20Poly1305, Nonce,
+    ChaCha20Poly1305, Key, Nonce,
 };
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct NoteStore {
     cipher: ChaCha20Poly1305,
-    /// id -> (encrypted content, creation timestamp, tags)
     sealed: HashMap<String, SealedNote>,
 }
 
-#[derive(Serialize, Deserialize)]
 struct SealedNote {
     ct: Vec<u8>,
     created: u64,
@@ -35,7 +33,6 @@ impl NoteStore {
     pub fn new() -> Self {
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
-        use chacha20poly1305::Key;
         let key = Key::from(key_bytes);
         key_bytes.zeroize();
         Self {
@@ -58,8 +55,7 @@ impl NoteStore {
             ct: sealed_ct,
             created: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+                .map_or(0, |d| d.as_secs()),
         })
     }
 
@@ -113,12 +109,17 @@ impl NoteStore {
         self.sealed.len()
     }
 
+    /// Note creation timestamp (seconds since UNIX epoch), if the id exists.
+    pub fn created_at(&self, id: &str) -> Option<u64> {
+        self.sealed.get(id).map(|s| s.created)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sealed.is_empty()
     }
 
     pub fn search(&self, query: &str) -> Vec<String> {
-        let needle = query.to_lowercase();
+        let needle = Zeroizing::new(query.to_lowercase());
         if needle.is_empty() {
             return self.ids();
         }
@@ -148,13 +149,24 @@ impl Default for NoteStore {
     }
 }
 
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
     NotFound,
     Seal,
     Corrupt,
 }
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound => write!(f, "note not found"),
+            Self::Seal => write!(f, "failed to seal note"),
+            Self::Corrupt => write!(f, "note is corrupt or tampered"),
+        }
+    }
+}
+
+impl std::error::Error for StoreError {}
 
 #[cfg(test)]
 mod tests {

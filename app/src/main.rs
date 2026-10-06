@@ -44,13 +44,15 @@ fn disable_core_dumps() {
 
 fn lock_memory() {
     raise_memlock_limit();
-    let flags = libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT;
-    if unsafe { libc::mlockall(flags) } != 0 {
-        let flags = libc::MCL_CURRENT | libc::MCL_FUTURE;
-        if unsafe { libc::mlockall(flags) } != 0 {
-            eprintln!("warning: could not lock memory; sensitive pages may be swapped");
-        }
+    if !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT)
+        && !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE)
+    {
+        eprintln!("warning: could not lock memory; sensitive pages may be swapped");
     }
+}
+
+fn mlockall_with(flags: libc::c_int) -> bool {
+    unsafe { libc::mlockall(flags) == 0 }
 }
 
 fn raise_memlock_limit() {
@@ -58,18 +60,23 @@ fn raise_memlock_limit() {
         rlim_cur: libc::RLIM_INFINITY,
         rlim_max: libc::RLIM_INFINITY,
     };
-    if unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) } == 0 {
+    if set_memlock(&limit) {
         return;
     }
     if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut limit) } != 0 {
+        eprintln!("warning: could not read RLIMIT_MEMLOCK");
         return;
     }
     if limit.rlim_max == libc::RLIM_INFINITY {
         limit.rlim_cur = libc::RLIM_INFINITY;
-        if unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) } != 0 {
+        if !set_memlock(&limit) {
             eprintln!("warning: could not raise RLIMIT_MEMLOCK");
         }
     }
+}
+
+fn set_memlock(limit: &libc::rlimit) -> bool {
+    unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, limit) == 0 }
 }
 
 fn build_ui(app: &adw::Application) {
@@ -224,7 +231,7 @@ fn schedule_auto_wipe(state: &Rc<App>) {
     if !state.auto_wipe_enabled.get() {
         return;
     }
-    let seconds = state.auto_wipe_minutes.get().max(1) * 60;
+    let seconds = state.auto_wipe_minutes.get().clamp(1, MAX_WIPE_MINUTES).saturating_mul(60);
     let timer_state = Rc::clone(state);
     let source = glib::timeout_add_seconds_local(seconds, move || {
         timer_state.store.borrow_mut().clear();
@@ -260,8 +267,10 @@ fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
             return;
         }
         let id = format!("n-{}", state.next_id.get());
-        state.next_id.set(state.next_id.get() + 1);
-        let _ = state.store.borrow_mut().put(&id, &text);
+        state.next_id.set(state.next_id.get().saturating_add(1));
+        if let Err(e) = state.store.borrow_mut().put(&id, &text) {
+            eprintln!("warning: could not save note: {e}");
+        }
         buffer.delete(&mut start, &mut end);
         refresh(&state);
     });
@@ -295,13 +304,14 @@ fn clear_rows(state: &Rc<App>) {
 }
 
 fn append_note_row(state: &Rc<App>, id: &str) {
-    let content = state
-        .store
-        .borrow()
-        .get(id)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|_| "<note illisible>".to_string());
-    let display = Zeroizing::new(content);
+    let display = Zeroizing::new(
+        state
+            .store
+            .borrow()
+            .get(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| "<note illisible>".to_string()),
+    );
     let label = gtk::Label::new(None);
     label.set_wrap(true);
     label.set_xalign(0.0);
@@ -319,7 +329,7 @@ fn append_note_row(state: &Rc<App>, id: &str) {
 fn connect_delete_on_click(state: Rc<App>, row: &gtk::ListBoxRow, id: &str) {
     let id = id.to_string();
     row.connect_activate(move |_row| {
-        let _ = state.store.borrow_mut().delete(&id);
+        state.store.borrow_mut().delete(&id);
         refresh(&state);
     });
 }
