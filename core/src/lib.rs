@@ -25,12 +25,19 @@ struct SealedNote {
     created: u64,
 }
 
+impl Drop for SealedNote {
+    fn drop(&mut self) {
+        self.ct.zeroize();
+    }
+}
+
 impl NoteStore {
     pub fn new() -> Self {
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         use chacha20poly1305::Key;
         let key = Key::from(key_bytes);
+        key_bytes.zeroize();
         Self {
             cipher: ChaCha20Poly1305::new(&key),
             sealed: HashMap::new(),
@@ -66,8 +73,15 @@ impl NoteStore {
             .cipher
             .decrypt(nonce, body)
             .map_err(|_| StoreError::Corrupt)?;
-        let s = String::from_utf8(pt).map_err(|_| StoreError::Corrupt)?;
-        Ok(Zeroizing::new(s))
+        let pt = Zeroizing::new(pt);
+        match String::from_utf8(pt.to_vec()) {
+            Ok(s) => Ok(Zeroizing::new(s)),
+            Err(e) => {
+                let mut bytes = e.into_bytes();
+                bytes.zeroize();
+                Err(StoreError::Corrupt)
+            }
+        }
     }
 
     /// Create or overwrite a note. The plaintext buffer is zeroized after sealing.
@@ -116,7 +130,10 @@ impl NoteStore {
 
     fn matches(&self, id: &str, needle: &str) -> bool {
         self.get(id)
-            .map(|content| content.to_lowercase().contains(needle))
+            .map(|content| {
+                let lower = Zeroizing::new(content.to_lowercase());
+                lower.contains(needle)
+            })
             .unwrap_or(false)
     }
 
@@ -131,13 +148,6 @@ impl Default for NoteStore {
     }
 }
 
-impl Drop for NoteStore {
-    fn drop(&mut self) {
-        for s in self.sealed.values_mut() {
-            s.ct.zeroize();
-        }
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub enum StoreError {

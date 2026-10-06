@@ -5,6 +5,7 @@ use gtk::{
 use libadwaita::{self as adw, prelude::*};
 use std::cell::RefCell;
 use std::rc::Rc;
+use zeroize::Zeroizing;
 
 const APP_ID: &str = "io.github.nariod.Vigilant";
 const CORE_LIMIT_ZERO: libc::rlim_t = 0;
@@ -25,6 +26,7 @@ struct App {
 
 fn main() -> glib::ExitCode {
     disable_core_dumps();
+    lock_memory();
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run()
@@ -35,7 +37,16 @@ fn disable_core_dumps() {
         rlim_cur: CORE_LIMIT_ZERO,
         rlim_max: CORE_LIMIT_ZERO,
     };
-    unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) };
+    if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) } != 0 {
+        eprintln!("warning: could not disable core dumps");
+    }
+}
+
+fn lock_memory() {
+    let flags = libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT;
+    if unsafe { libc::mlockall(flags) } != 0 {
+        eprintln!("warning: could not lock memory; sensitive pages may be swapped");
+    }
 }
 
 fn build_ui(app: &adw::Application) {
@@ -221,14 +232,13 @@ fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
     save_btn.connect_clicked(move |_btn| {
         let mut buffer = input.buffer();
         let (mut start, mut end) = (buffer.start_iter(), buffer.end_iter());
-        let mut text = buffer.text(&start, &end, false).to_string();
+        let text = Zeroizing::new(buffer.text(&start, &end, false).to_string());
         if text.trim().is_empty() {
             return;
         }
         let id = format!("n-{}", state.next_id.get());
         state.next_id.set(state.next_id.get() + 1);
         let _ = state.store.borrow_mut().put(&id, &text);
-        zeroize::Zeroize::zeroize(&mut text);
         buffer.delete(&mut start, &mut end);
         refresh(&state);
     });
@@ -268,6 +278,7 @@ fn append_note_row(state: &Rc<App>, id: &str) {
         .get(id)
         .map(|s| s.to_string())
         .unwrap_or_else(|_| "<note illisible>".to_string());
+    let display = Zeroizing::new(content);
     let label = gtk::Label::new(None);
     label.set_wrap(true);
     label.set_xalign(0.0);
@@ -275,7 +286,7 @@ fn append_note_row(state: &Rc<App>, id: &str) {
     label.set_margin_bottom(8);
     label.set_margin_start(12);
     label.set_margin_end(12);
-    label.set_text(&content);
+    label.set_text(&display);
     let row = gtk::ListBoxRow::new();
     row.set_child(Some(&label));
     connect_delete_on_click(state.clone(), &row, id);
