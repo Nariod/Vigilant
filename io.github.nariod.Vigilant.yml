@@ -1,8 +1,15 @@
 app-id: io.github.nariod.Vigilant
 runtime: org.gnome.Platform
-runtime-version: "47"
+runtime-version: "48"
 sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
 command: vigilant
+
+build-options:
+  env:
+    CARGO_HOME: /run/build/vigilant/cargo-home
+    PATH: /usr/lib/sdk/rust-stable/bin:/usr/bin:/bin
 
 finish-args:
   - --share=ipc
@@ -14,7 +21,7 @@ modules:
   - name: vigilant
     buildsystem: simple
     build-commands:
-      - cargo --offline build --release
+      - cargo build --release
       - install -Dm755 target/release/vigilant /app/bin/vigilant
       - install -Dm644 data/io.github.nariod.Vigilant.desktop /app/share/applications/io.github.nariod.Vigilant.desktop
       - install -Dm644 data/io.github.nariod.Vigilant.metainfo.xml /app/share/metainfo/io.github.nariod.Vigilant.metainfo.xml
@@ -22,5 +29,3 @@ modules:
     sources:
       - type: dir
         path: .
-      # Dépendances vendées pour un build 100% offline dans le sandbox Flatpak :
-      #   cargo vendor vendor/  (le .cargo/config.toml généré est commité)
