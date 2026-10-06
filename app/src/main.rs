@@ -229,14 +229,15 @@ fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: &gtk::TextView) {
         state.next_id.set(state.next_id.get() + 1);
         let _ = state.store.borrow_mut().put(&id, &text);
         zeroize::Zeroize::zeroize(&mut text);
-        buffer.delete(&start, &end);
+        buffer.delete(&mut start, &mut end);
         refresh(&state);
     });
 }
 
 fn connect_search(state: Rc<App>) {
+    let search_state = Rc::clone(&state);
     state.search_entry.connect_search_changed(move |_| {
-        refresh(&state);
+        refresh(&search_state);
     });
 }
 
