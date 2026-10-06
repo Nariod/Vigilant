@@ -2,7 +2,7 @@ use gtk::{
     glib::{self, ControlFlow},
     prelude::*,
 };
-use libadwaita as adw;
+use libadwaita::{self as adw, prelude::*};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -115,7 +115,7 @@ fn build_ui(app: &adw::Application) {
 }
 
 fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
-    let popover = gtk::PopoverMenu::new();
+    let popover = gtk::Popover::new();
     settings_btn.set_popover(Some(&popover));
 
     let wipe_switch = gtk::Switch::new();
