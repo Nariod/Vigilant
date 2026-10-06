@@ -1,0 +1,16 @@
+[package]
+name = "vigilant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ephemeral, encrypted scratch notes"
+
+[[bin]]
+name = "vigilant"
+path = "src/main.rs"
+
+[dependencies]
+vigilant-core = { path = "../core" }
+gtk = { version = "0.11", package = "gtk4" }
+libadwaita = { version = "0.9", package = "libadwaita" }
+zeroize = "1"

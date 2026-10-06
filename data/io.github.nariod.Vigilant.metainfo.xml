@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nariod.Vigilant</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0+</project_license>
+  <name>Secure Scratch</name>
+  <summary>Ephemeral, encrypted scratch notes</summary>
+  <description>
+    <p>Secure Scratch is a note-taking application for temporary notes.
+    Notes live only in memory, encrypted with ChaCha20-Poly1305 under a
+    random session key, and are destroyed when the application closes.
+    Nothing is ever written to disk.</p>
+  </description>
+  <launchable type="desktop-id">io.github.nariod.Vigilant.desktop</launchable>
+  <url type="homepage">https://github.com/Nariod/Vigilant</url>
+  <developer_name>Secure Scratch contributors</developer_name>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <releases>
+    <release version="0.1.0" date="2026-01-01">
+      <description><p>Initial release.</p></description>
+    </release>
+  </releases>
+</component>

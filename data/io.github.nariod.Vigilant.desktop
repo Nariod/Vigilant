@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Secure Scratch
+Comment=Ephemeral, encrypted scratch notes
+Exec=vigilant
+Icon=io.github.nariod.Vigilant
+Terminal=false
+Type=Application
+Categories=Utility;GNOME;GTK;
+Keywords=notes;scratch;ephemeral;secure;
+StartupNotify=true
+NoDisplay=false
