@@ -5,11 +5,9 @@ use gtk::{
 use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 const APP_ID: &str = "io.github.nariod.Vigilant";
-const AUTO_LOCK_MINUTES: u64 = 5;
-const AUTO_LOCK_TICK_MS: u32 = 10_000;
+const CORE_LIMIT_ZERO: libc::rlim_t = 0;
 
 struct App {
     store: RefCell<vigilant_core::NoteStore>,
@@ -18,13 +16,21 @@ struct App {
     empty_label: gtk::Label,
     stack: gtk::Stack,
     next_id: std::cell::Cell<u64>,
-    is_locked: std::cell::Cell<bool>,
 }
 
 fn main() -> glib::ExitCode {
+    disable_core_dumps();
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run()
+}
+
+fn disable_core_dumps() {
+    let limit = libc::rlimit {
+        rlim_cur: CORE_LIMIT_ZERO,
+        rlim_max: CORE_LIMIT_ZERO,
+    };
+    unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) };
 }
 
 fn build_ui(app: &adw::Application) {
@@ -45,7 +51,6 @@ fn build_ui(app: &adw::Application) {
         empty_label: build_empty_label(),
         stack: gtk::Stack::new(),
         next_id: std::cell::Cell::new(0),
-        is_locked: std::cell::Cell::new(false),
     });
 
     let input = gtk::TextView::builder()
@@ -90,7 +95,7 @@ fn build_ui(app: &adw::Application) {
 
     connect_save(state.clone(), &save_btn, &input);
     connect_search(state.clone());
-    start_auto_lock(state.clone(), &window);
+    start_auto_wipe(state.clone());
 
     refresh(&state);
     window.present();
@@ -131,41 +136,23 @@ fn connect_search(state: Rc<App>) {
     });
 }
 
-fn start_auto_lock(state: Rc<App>, window: &adw::ApplicationWindow) {
-    window.set_focusable(true);
-    let last_activity = Rc::new(std::cell::Cell::new(std::time::Instant::now()));
-    track_activity(last_activity.clone(), window);
-    glib::timeout_add_seconds_local(AUTO_LOCK_MINUTES, move || {
-        if last_activity.get().elapsed() >= Duration::from_secs(AUTO_LOCK_MINUTES) {
-            state.store.borrow_mut().clear();
-            state.is_locked.set(true);
-            refresh(&state);
-            show_locked_overlay(&state, window);
-            return ControlFlow::Break;
-        }
+fn start_auto_wipe(state: Rc<App>) {
+    let minutes = auto_wipe_minutes_from_env();
+    if minutes == 0 {
+        return;
+    }
+    glib::timeout_add_seconds_local(minutes, move || {
+        state.store.borrow_mut().clear();
+        refresh(&state);
         ControlFlow::Continue
     });
 }
 
-fn track_activity(last_activity: Rc<std::cell::Cell<std::time::Instant>>, window: &adw::ApplicationWindow) {
-    for signal in ["notify::has-focus", "key-press-event"] {
-        window.connect_local(signal, false, move |_args| {
-            last_activity.set(std::time::Instant::now());
-            None
-        });
-    }
-}
-
-fn show_locked_overlay(state: &Rc<App>, window: &adw::ApplicationWindow) {
-    let dialog = adw::AlertDialog::new(
-        Some("Verrouillé"),
-        Some("Toutes les notes ont été effacées après inactivité."),
-    );
-    dialog.add_response("ok", "Déverrouiller");
-    let state = state.clone();
-    dialog.choose(window, None::<&gtk::Cancellable>, move |_response| {
-        state.is_locked.set(false);
-    });
+fn auto_wipe_minutes_from_env() -> u32 {
+    std::env::var("VIGILANT_AUTO_WIPE_MINUTES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
 }
 
 fn current_query(state: &Rc<App>) -> String {

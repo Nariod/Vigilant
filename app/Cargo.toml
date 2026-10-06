@@ -14,3 +14,4 @@ vigilant-core = { path = "../core" }
 gtk = { version = "0.11", package = "gtk4" }
 libadwaita = { version = "0.9", package = "libadwaita" }
 zeroize = "1"
+libc = "0.2"

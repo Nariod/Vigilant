@@ -9,6 +9,7 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --socket=wayland
+  - --env=VIGILANT_AUTO_WIPE_MINUTES=0
 
 modules:
   - name: vigilant

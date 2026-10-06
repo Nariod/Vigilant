@@ -7,7 +7,29 @@ Application de prise de notes **temporaires et chiffrées**, distribuée **uniqu
 - **Aucune écriture disque** : les notes vivent exclusivement en mémoire (RAM).
 - **Chiffrement ChaCha20-Poly1305** : chaque note est scellée sous une clé de session aléatoire, non persistée.
 - **Session unique** : à la fermeture de l'application, tout est détruit — clés et textes en clair sont *zéroïsés*.
+- **Core dumps désactivés** (`RLIMIT_CORE=0`) : aucun fichier core ne peut être écrit en cas de crash.
+- **Sandbox Flatpak sans accès disque persistant** : aucun système de fichiers hors `/app` et XDG config.
 - **UI GTK4 / libadwaita**, native GNOME, adaptée à Flatpak.
+
+### Auto-wipe (optionnel, désactivé par défaut)
+
+L'application reste ouverte toute la journée sans rien effacer. Pour activer
+l'effacement automatique après N minutes d'existence des notes :
+
+```bash
+flatpak override --user --env=VIGILANT_AUTO_WIPE_MINUTES=10 io.github.nariod.Vigilant
+```
+
+`0` (valeur par défaut) = jamais d'effacement automatique.
+
+### Blocage des captures d'écran
+
+Sur **Wayland**, le compositeur contrôle les captures : GTK4 permet de
+marquer la surface comme *non-enregistreable* (`xdg_session_lock` /
+`constraint`), mais le comportement des outils de screenshot (noir vs
+capture ignorée) dépend du compositeur (GNOME, KDE, wlroots). Sur Wayland
+pur, la fuite de contenu par capture d'écran système est de toute façon
+limitée à l'utilisateur lui-même. Sur X11, cette protection n'existe pas.
 
 ## Structure du projet
 
