@@ -13,14 +13,24 @@
   </description>
   <launchable type="desktop-id">io.github.nariod.Vigilant.desktop</launchable>
   <url type="homepage">https://github.com/Nariod/Vigilant</url>
+  <url type="bugtracker">https://github.com/Nariod/Vigilant/issues</url>
+  <url type="donation">https://github.com/Nariod/Vigilant</url>
   <developer_name>Secure Scratch contributors</developer_name>
   <content_rating type="oars-1.1"/>
   <requires>
     <display_length compare="ge">360</display_length>
   </requires>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window with the note list</caption>
+      <image type="source" width="1440" height="900">https://raw.githubusercontent.com/Nariod/Vigilant/main/data/screenshots/main-window.png</image>
+    </screenshot>
+  </screenshots>
   <releases>
     <release version="0.1.0" date="2026-01-01">
-      <description><p>Initial release.</p></description>
+      <description>
+        <p>Initial release.</p>
+      </description>
     </release>
   </releases>
 </component>
