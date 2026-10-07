@@ -27,6 +27,13 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.1" date="2026-10-08">
+      <description>
+        <p>Update dependencies: chacha20poly1305 0.11, rand 0.10.</p>
+        <p>Fix Flatpak manifest (Rust SDK extension resolution), fix application
+        name shown as "Secure Scratch".</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-01-01">
       <description>
         <p>Initial release.</p>
