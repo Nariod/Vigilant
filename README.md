@@ -159,7 +159,9 @@ flatpak install --user flathub \
   org.freedesktop.Sdk.Extension.rust-stable//25.08
 ```
 > The Rust extension branch is `25.08` (the Freedesktop SDK version GNOME 49
-> is based on), even though the GNOME runtime branch is `49`.
+> is based on), even though the GNOME runtime branch is `49`. The manifest
+> declares the extension without a branch suffix; flatpak-builder resolves
+> the correct version from the SDK metadata.
 
 ### Build
 
@@ -174,10 +176,9 @@ flatpak-builder --force-clean build-dir io.github.nariod.Vigilant.yml
 flatpak-builder --force-clean --user --install build-dir io.github.nariod.Vigilant.yml
 ```
 
-If you hit `Requested extension org.freedesktop.Sdk.Extension.rust-stable/x86_64/49
-not installed`, the extension branch is pinned in the manifest
-(`org.freedesktop.Sdk.Extension.rust-stable//25.08`) — make sure it is
-installed and your local manifest is up to date.
+If you hit `Requested extension org.freedesktop.Sdk.Extension.rust-stable ... not
+installed`, install the `//25.08` branch (see above) — flatpak-builder looks it
+up by the version declared in the GNOME 49 SDK metadata.
 
 To uninstall the local build:
 
