@@ -125,7 +125,7 @@ fn build_ui(app: &adw::Application) {
         .height_request(96)
         .build();
 
-    let save_btn = gtk::Button::with_label("Ajouter");
+    let save_btn = gtk::Button::with_label("Add");
     save_btn.add_css_class("suggested-action");
     save_btn.set_halign(gtk::Align::End);
 
@@ -178,7 +178,7 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
     wipe_switch.set_valign(gtk::Align::Center);
 
     let wipe_row = adw::ActionRow::builder()
-        .title("Effacement automatique des notes")
+        .title("Automatic note wiping")
         .build();
     wipe_row.add_suffix(&wipe_switch);
 
@@ -191,14 +191,14 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
         0.0,
     );
     let timer_row = adw::SpinRow::new(Some(&adjustment), 1.0, 0);
-    timer_row.set_title("Délai (minutes)");
+    timer_row.set_title("Delay (minutes)");
 
-    let wipe_now_btn = gtk::Button::with_label("Effacer");
+    let wipe_now_btn = gtk::Button::with_label("Erase");
     wipe_now_btn.add_css_class("destructive-action");
     wipe_now_btn.set_valign(gtk::Align::Center);
 
     let wipe_now_row = adw::ActionRow::builder()
-        .title("Effacer toutes les notes maintenant")
+        .title("Erase all notes now")
         .build();
     wipe_now_row.add_suffix(&wipe_now_btn);
 
@@ -264,7 +264,7 @@ fn cancel_auto_wipe(state: &Rc<App>) {
 
 fn build_empty_label() -> gtk::Label {
     let label = gtk::Label::new(Some(
-        "Aucune note.\nLes notes disparaissent à la fermeture de l'application.",
+        "No notes yet.\nNotes disappear when the application closes.",
     ));
     label.set_valign(gtk::Align::Start);
     label.set_margin_top(48);
@@ -325,7 +325,7 @@ fn append_note_row(state: &Rc<App>, id: &str) {
             .borrow()
             .get(id)
             .map(|s| s.to_string())
-            .unwrap_or_else(|_| "<note illisible>".to_string()),
+            .unwrap_or_else(|_| "<unreadable note>".to_string()),
     );
     let label = gtk::Label::new(None);
     label.set_wrap(true);
