@@ -5,6 +5,18 @@ on:
   pull_request:
 
 jobs:
+  vendor-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify vendor directory matches Cargo.lock
+        run: |
+          mv .cargo/config.toml /tmp/cargo-config.toml
+          cargo vendor /tmp/vendor-check
+          mv /tmp/cargo-config.toml .cargo/config.toml
+          diff -rq vendor /tmp/vendor-check
+
   core-tests:
     runs-on: ubuntu-latest
     steps:
