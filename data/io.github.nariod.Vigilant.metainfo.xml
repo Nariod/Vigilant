@@ -3,10 +3,10 @@
   <id>io.github.nariod.Vigilant</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0+</project_license>
-  <name>Secure Scratch</name>
+  <name>Vigilant</name>
   <summary>Ephemeral, encrypted scratch notes</summary>
   <description>
-    <p>Secure Scratch is a note-taking application for temporary notes.
+    <p>Vigilant is a note-taking application for temporary notes.
     Notes live only in memory, encrypted with ChaCha20-Poly1305 under a
     random session key, and are destroyed when the application closes.
     Nothing is ever written to disk.</p>
@@ -15,7 +15,7 @@
   <url type="homepage">https://github.com/Nariod/Vigilant</url>
   <url type="bugtracker">https://github.com/Nariod/Vigilant/issues</url>
   <url type="donation">https://github.com/Nariod/Vigilant</url>
-  <developer_name>Secure Scratch contributors</developer_name>
+  <developer_name>Nariod</developer_name>
   <content_rating type="oars-1.1"/>
   <requires>
     <display_length compare="ge">360</display_length>
