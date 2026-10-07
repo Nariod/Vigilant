@@ -72,23 +72,117 @@ io.github.nariod.Vigilant.yml   Flatpak manifest
 
 ## Development
 
+### Prerequisites
+
+- Rust (stable) via [rustup](https://rustup.rs/)
+- GTK4 and libadwaita development packages:
+
 ```bash
-cargo test -p vigilant-core
-cargo run -p vigilant   # requires gtk4 and libadwaita
+# Fedora
+sudo dnf install gtk4-devel libadwaita-devel
+# Debian/Ubuntu
+sudo apt install libgtk-4-dev libadwaita-1-dev
+```
+
+### Build and test
+
+The workspace uses vendored dependencies (`.cargo/config.toml` redirects
+`crates.io` to `vendor/`), so most commands work fully offline:
+
+```bash
+cargo test -p vigilant-core      # core library tests (8 tests)
+cargo check --workspace          # type-check everything
+cargo build                      # debug build
+cargo run -p vigilant            # run the app (requires gtk4 + libadwaita)
+cargo build --release            # optimized binary in target/release/vigilant
+```
+
+If you change any dependency in `Cargo.toml`, you **must re-vendor**:
+
+```bash
+rm -rf vendor
+cargo vendor vendor
+```
+
+The `.cargo/config.toml` is already in the repository; `cargo vendor`
+prints it again but the existing file can be kept as-is.
+
+### Debugging tips
+
+- **Run with logs on stderr**: Vigilant prints `mlockall` failures and other
+  warnings on stderr. Run from a terminal (`cargo run -p vigilant`) to see
+  them.
+- **GTK logging**: increase verbosity with
+  `G_MESSAGES_DEBUG=all cargo run -p vigilant`.
+- **Rust backtraces**: `RUST_BACKTRACE=1` (or `full`) before `cargo run`.
+- **Check memory-lock status**: `ulimit -l` — see the *Memory locking*
+  section above if `mlockall` warns at startup.
+- **Run a single test**: `cargo test -p vigilant-core put_get_roundtrip`.
+- **Clippy / formatting**:
+
+```bash
+cargo clippy --workspace
+cargo fmt --check
+```
+
+### Flatpak runtime debugging
+
+Once the Flatpak is installed:
+
+```bash
+# Shell inside the sandbox
+flatpak run --command=sh io.github.nariod.Vigilant
+
+# Run the binary with debug output
+flatpak run --env=G_MESSAGES_DEBUG=all io.github.nariod.Vigilant
+
+# See warnings (e.g. mlockall) directly
+cargo run -p vigilant 2>&1 | grep -i warn
 ```
 
 ## Flatpak build
 
-```bash
-# 1. Vendor the Rust dependencies (offline build inside the Flatpak sandbox)
-cargo vendor vendor/
-# (a .cargo/config.toml pointing to vendor/ is generated)
+### One-time setup
 
-# 2. Build
+```bash
+# flatpak-builder (Fedora)
+sudo dnf install flatpak-builder
+
+# Add Flathub remote (--user or --system)
+flatpak remote-add --if-not-exists --user flathub \
+  https://dl.flathub.org/repo/flathub.flatpakrepo
+
+# Install the GNOME 49 SDK, platform and Rust extension
+flatpak install --user flathub \
+  org.gnome.Sdk//49 \
+  org.gnome.Platform//49 \
+  org.freedesktop.Sdk.Extension.rust-stable//25.08
+```
+> The Rust extension branch is `25.08` (the Freedesktop SDK version GNOME 49
+> is based on), even though the GNOME runtime branch is `49`.
+
+### Build
+
+```bash
+# Dependencies are already vendored in vendor/ for the offline sandbox build.
+# Re-vendor only if Cargo.toml changed (see Development section).
+
+# Build
 flatpak-builder --force-clean build-dir io.github.nariod.Vigilant.yml
 
-# 3. Local install
-flatpak-builder --user --install --force-clean build-dir io.github.nariod.Vigilant.yml
+# Build and install locally
+flatpak-builder --force-clean --user --install build-dir io.github.nariod.Vigilant.yml
+```
+
+If you hit `Requested extension org.freedesktop.Sdk.Extension.rust-stable/x86_64/49
+not installed`, the extension branch is pinned in the manifest
+(`org.freedesktop.Sdk.Extension.rust-stable//25.08`) — make sure it is
+installed and your local manifest is up to date.
+
+To uninstall the local build:
+
+```bash
+flatpak uninstall --user io.github.nariod.Vigilant
 ```
 
 The required SDK is `org.gnome.Sdk` (runtime `org.gnome.Platform`).

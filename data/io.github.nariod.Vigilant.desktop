@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Secure Scratch
+Name=Vigilant
 Comment=Ephemeral, encrypted scratch notes
 Exec=vigilant
 Icon=io.github.nariod.Vigilant
