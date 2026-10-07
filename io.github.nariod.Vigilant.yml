@@ -5,17 +5,14 @@ sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: vigilant
-
 build-options:
   env:
     CARGO_HOME: /run/build/vigilant/cargo-home
     PATH: /usr/lib/sdk/rust-stable/bin:/usr/bin:/bin
-
 finish-args:
   - --share=ipc
   - --device=dri
   - --socket=wayland
-
 modules:
   - name: vigilant
     buildsystem: simple
@@ -26,5 +23,9 @@ modules:
       - install -Dm644 data/io.github.nariod.Vigilant.metainfo.xml /app/share/metainfo/io.github.nariod.Vigilant.metainfo.xml
       - install -Dm644 data/icons/io.github.nariod.Vigilant.svg /app/share/icons/hicolor/scalable/apps/io.github.nariod.Vigilant.svg
     sources:
-      - type: dir
-        path: .
+      - type: git
+        url: https://github.com/Nariod/Vigilant.git
+        tag: v0.1.0
+        x-checker-data:
+          type: git
+          tag-pattern: ^v([\d.]+)$
