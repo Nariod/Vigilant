@@ -5,10 +5,11 @@
 //! and plaintext buffers are zeroized after use.
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use std::collections::HashMap;
 use std::fmt;
 use zeroize::{Zeroize, Zeroizing};
@@ -32,7 +33,7 @@ impl Drop for SealedNote {
 impl NoteStore {
     pub fn new() -> Self {
         let mut key_bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut key_bytes);
+        SysRng.try_fill_bytes(&mut key_bytes).expect("system RNG failure");
         let key = Key::from(key_bytes);
         key_bytes.zeroize();
         Self {
@@ -43,11 +44,11 @@ impl NoteStore {
 
     fn seal(&self, plaintext: &str) -> Result<SealedNote, StoreError> {
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        SysRng.try_fill_bytes(&mut nonce_bytes).expect("system RNG failure");
+        let nonce = Nonce::from(nonce_bytes);
         let ct = self
             .cipher
-            .encrypt(nonce, plaintext.as_bytes())
+            .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|_| StoreError::Seal)?;
         let mut sealed_ct = nonce_bytes.to_vec();
         sealed_ct.extend_from_slice(&ct);
@@ -64,10 +65,10 @@ impl NoteStore {
             return Err(StoreError::Corrupt);
         }
         let (nonce_bytes, body) = sealed.ct.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::try_from(nonce_bytes).map_err(|_| StoreError::Corrupt)?;
         let pt = self
             .cipher
-            .decrypt(nonce, body)
+            .decrypt(&nonce, body)
             .map_err(|_| StoreError::Corrupt)?;
         let pt = Zeroizing::new(pt);
         match String::from_utf8(pt.to_vec()) {
