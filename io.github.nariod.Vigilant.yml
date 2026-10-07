@@ -3,7 +3,7 @@ runtime: org.gnome.Platform
 runtime-version: "49"
 sdk: org.gnome.Sdk
 sdk-extensions:
-  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.rust-stable//25.08
 command: vigilant
 build-options:
   env:
