@@ -354,11 +354,9 @@ fn clear_clipboards() {
 }
 
 fn connect_close(state: &Rc<App>, window: &adw::ApplicationWindow) {
-    let weak: Weak<App> = Rc::downgrade(state);
+    let holder = Rc::clone(state);
     window.connect_close_request(move |_| {
-        if let Some(state) = weak.upgrade() {
-            full_shutdown_wipe(&state);
-        }
+        full_shutdown_wipe(&holder);
         glib::Propagation::Proceed
     });
 }
