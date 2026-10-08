@@ -4,31 +4,39 @@ use gtk::{
 };
 use libadwaita::{self as adw, prelude::*};
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+use std::time::Instant;
 use zeroize::Zeroizing;
 
 const APP_ID: &str = "io.github.nariod.Vigilant";
 const CORE_LIMIT_ZERO: libc::rlim_t = 0;
 const DEFAULT_WIPE_MINUTES: u32 = 10;
 const MAX_WIPE_MINUTES: u32 = 480;
+const MASKED_LABEL: &str = "••••••••";
+const TICK_SECONDS: u32 = 60;
 
 struct App {
     store: RefCell<vigilant_core::NoteStore>,
+    window: RefCell<Option<adw::ApplicationWindow>>,
     search_entry: gtk::SearchEntry,
+    input_buffer: RefCell<Option<gtk::TextBuffer>>,
     notes_box: gtk::ListBox,
     empty_label: gtk::Label,
     stack: gtk::Stack,
+    banner: adw::Banner,
     next_id: std::cell::Cell<u64>,
     auto_wipe_source: RefCell<Option<glib::SourceId>>,
     auto_wipe_enabled: std::cell::Cell<bool>,
     auto_wipe_minutes: std::cell::Cell<u32>,
+    last_activity: RefCell<Instant>,
 }
 
 fn main() -> glib::ExitCode {
     disable_core_dumps();
-    lock_memory();
+    set_non_dumpable();
+    let memory_locked = lock_memory();
     let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(build_ui);
+    app.connect_activate(move |app| build_ui(app, memory_locked));
     app.run()
 }
 
@@ -42,17 +50,24 @@ fn disable_core_dumps() {
     }
 }
 
-fn lock_memory() {
+fn set_non_dumpable() {
+    if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } != 0 {
+        eprintln!("warning: could not set PR_SET_DUMPABLE");
+    }
+}
+
+fn lock_memory() -> bool {
     raise_memlock_limit();
-    if !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT)
-        && !mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE)
-    {
+    let locked = mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE | libc::MCL_ONFAULT)
+        || mlockall_with(libc::MCL_CURRENT | libc::MCL_FUTURE);
+    if !locked {
         eprintln!(
             "warning: could not lock memory (errno {}, memlock soft limit {} bytes); sensitive pages may be swapped",
             std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
             memlock_soft_limit()
         );
     }
+    locked
 }
 
 fn memlock_soft_limit() -> libc::rlim_t {
@@ -94,7 +109,11 @@ fn set_memlock(limit: &libc::rlimit) -> bool {
     unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, limit) == 0 }
 }
 
-fn build_ui(app: &adw::Application) {
+fn private_input_hints() -> gtk::InputHints {
+    gtk::InputHints::PRIVATE | gtk::InputHints::NO_SPELLCHECK
+}
+
+fn build_ui(app: &adw::Application, memory_locked: bool) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .default_width(480)
@@ -104,18 +123,25 @@ fn build_ui(app: &adw::Application) {
 
     let state = Rc::new(App {
         store: RefCell::new(vigilant_core::NoteStore::new()),
+        window: RefCell::new(None),
         search_entry: gtk::SearchEntry::new(),
+        input_buffer: RefCell::new(None),
         notes_box: gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .css_classes(vec!["boxed-list".to_string()])
             .build(),
         empty_label: build_empty_label(),
         stack: gtk::Stack::new(),
+        banner: adw::Banner::new(""),
         next_id: std::cell::Cell::new(0),
         auto_wipe_source: RefCell::new(None),
         auto_wipe_enabled: std::cell::Cell::new(false),
         auto_wipe_minutes: std::cell::Cell::new(DEFAULT_WIPE_MINUTES),
+        last_activity: RefCell::new(Instant::now()),
     });
+    *state.window.borrow_mut() = Some(window.clone());
+
+    state.search_entry.set_input_hints(private_input_hints());
 
     let input = gtk::TextView::builder()
         .wrap_mode(gtk::WrapMode::WordChar)
@@ -124,6 +150,9 @@ fn build_ui(app: &adw::Application) {
         .hexpand(true)
         .height_request(96)
         .build();
+    input.set_input_hints(private_input_hints());
+    input.set_input_purpose(gtk::InputPurpose::Password);
+    input.buffer().set_enable_undo(false);
 
     let save_btn = gtk::Button::with_label("Add");
     save_btn.add_css_class("suggested-action");
@@ -159,15 +188,36 @@ fn build_ui(app: &adw::Application) {
 
     let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
     layout.append(&header);
+    layout.append(&state.banner);
     layout.append(&vbox);
     window.set_content(Some(&layout));
 
+    if !memory_locked {
+        state.banner.set_title(
+            "Memory could not be locked: sensitive pages may reach the swap. See README.",
+        );
+        state.banner.set_revealed(true);
+    }
+
     build_settings_popover(&state, &settings_btn);
-    connect_save(state.clone(), &save_btn, input.clone());
-    connect_search(state.clone());
+    connect_save(&state, &save_btn, input.clone());
+    *state.input_buffer.borrow_mut() = Some(input.buffer());
+    connect_search(&state);
+    connect_close(&state, &window);
 
     refresh(&state);
     window.present();
+}
+
+fn build_empty_label() -> gtk::Label {
+    let label = gtk::Label::new(Some(
+        "No notes yet.\nNotes disappear when the application closes.",
+    ));
+    label.set_valign(gtk::Align::Start);
+    label.set_margin_top(48);
+    label.set_justify(gtk::Justification::Center);
+    label.add_css_class("dim-label");
+    label
 }
 
 fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
@@ -191,7 +241,7 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
         0.0,
     );
     let timer_row = adw::SpinRow::new(Some(&adjustment), 1.0, 0);
-    timer_row.set_title("Delay (minutes)");
+    timer_row.set_title("Idle delay (minutes)");
 
     let wipe_now_btn = gtk::Button::with_label("Erase");
     wipe_now_btn.add_css_class("destructive-action");
@@ -215,29 +265,38 @@ fn build_settings_popover(state: &Rc<App>, settings_btn: &gtk::MenuButton) {
     content.append(&prefs_group);
     popover.set_child(Some(&content));
 
-    connect_wipe_switch(Rc::clone(state), &wipe_switch);
-    connect_timer_row(Rc::clone(state), &timer_row);
-    connect_wipe_now(Rc::clone(state), &wipe_now_btn);
+    connect_wipe_switch(state, &wipe_switch);
+    connect_timer_row(state, &timer_row);
+    connect_wipe_now(state, &wipe_now_btn);
 }
 
-fn connect_wipe_switch(state: Rc<App>, wipe_switch: &gtk::Switch) {
+fn connect_wipe_switch(state: &Rc<App>, wipe_switch: &gtk::Switch) {
+    let weak: Weak<App> = Rc::downgrade(state);
     wipe_switch.connect_state_notify(move |switch| {
-        state.auto_wipe_enabled.set(switch.is_active());
-        schedule_auto_wipe(&state);
+        if let Some(state) = weak.upgrade() {
+            state.auto_wipe_enabled.set(switch.is_active());
+            schedule_auto_wipe(&state);
+        }
     });
 }
 
-fn connect_timer_row(state: Rc<App>, timer_row: &adw::SpinRow) {
+fn connect_timer_row(state: &Rc<App>, timer_row: &adw::SpinRow) {
+    let weak: Weak<App> = Rc::downgrade(state);
     timer_row.connect_changed(move |row| {
-        state.auto_wipe_minutes.set(row.value() as u32);
-        schedule_auto_wipe(&state);
+        if let Some(state) = weak.upgrade() {
+            state.auto_wipe_minutes.set(row.value() as u32);
+            schedule_auto_wipe(&state);
+        }
     });
 }
 
-fn connect_wipe_now(state: Rc<App>, wipe_now_btn: &gtk::Button) {
+fn connect_wipe_now(state: &Rc<App>, wipe_now_btn: &gtk::Button) {
+    let weak: Weak<App> = Rc::downgrade(state);
     wipe_now_btn.connect_clicked(move |_btn| {
-        state.store.borrow_mut().clear();
-        refresh(&state);
+        if let Some(state) = weak.upgrade() {
+            wipe_everything(&state);
+            refresh(&state);
+        }
     });
 }
 
@@ -246,14 +305,25 @@ fn schedule_auto_wipe(state: &Rc<App>) {
     if !state.auto_wipe_enabled.get() {
         return;
     }
-    let seconds = state.auto_wipe_minutes.get().clamp(1, MAX_WIPE_MINUTES).saturating_mul(60);
-    let timer_state = Rc::clone(state);
-    let source = glib::timeout_add_seconds_local(seconds, move || {
-        timer_state.store.borrow_mut().clear();
-        refresh(&timer_state);
-        ControlFlow::Continue
+    let weak: Weak<App> = Rc::downgrade(state);
+    let source = glib::timeout_add_seconds_local(TICK_SECONDS, move || match weak.upgrade() {
+        Some(state) => {
+            auto_wipe_tick(&state);
+            ControlFlow::Continue
+        }
+        None => ControlFlow::Break,
     });
     state.auto_wipe_source.borrow_mut().replace(source);
+}
+
+fn auto_wipe_tick(state: &Rc<App>) {
+    let threshold = state.auto_wipe_minutes.get().clamp(1, MAX_WIPE_MINUTES) as u64;
+    let idle_secs = state.last_activity.borrow().elapsed().as_secs();
+    if idle_secs < threshold.saturating_mul(60) {
+        return;
+    }
+    wipe_everything(state);
+    refresh(state);
 }
 
 fn cancel_auto_wipe(state: &Rc<App>) {
@@ -262,19 +332,41 @@ fn cancel_auto_wipe(state: &Rc<App>) {
     }
 }
 
-fn build_empty_label() -> gtk::Label {
-    let label = gtk::Label::new(Some(
-        "No notes yet.\nNotes disappear when the application closes.",
-    ));
-    label.set_valign(gtk::Align::Start);
-    label.set_margin_top(48);
-    label.set_justify(gtk::Justification::Center);
-    label.add_css_class("dim-label");
-    label
+fn wipe_everything(state: &Rc<App>) {
+    state.store.borrow_mut().clear();
+    state.search_entry.set_text("");
+    if let Some(buffer) = state.input_buffer.borrow().as_ref() {
+        buffer.set_text("");
+    }
+    *state.last_activity.borrow_mut() = Instant::now();
 }
 
-fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
+fn full_shutdown_wipe(state: &Rc<App>) {
+    wipe_everything(state);
+    clear_clipboards();
+}
+
+fn clear_clipboards() {
+    if let Some(display) = gtk::gdk::Display::default() {
+        display.clipboard().set_text("");
+        display.primary_clipboard().set_text("");
+    }
+}
+
+fn connect_close(state: &Rc<App>, window: &adw::ApplicationWindow) {
+    let weak: Weak<App> = Rc::downgrade(state);
+    window.connect_close_request(move |_| {
+        if let Some(state) = weak.upgrade() {
+            full_shutdown_wipe(&state);
+        }
+        glib::Propagation::Proceed
+    });
+}
+
+fn connect_save(state: &Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
+    let weak: Weak<App> = Rc::downgrade(state);
     save_btn.connect_clicked(move |_btn| {
+        let Some(state) = weak.upgrade() else { return };
         let buffer = input.buffer();
         let (mut start, mut end) = (buffer.start_iter(), buffer.end_iter());
         let text = Zeroizing::new(buffer.text(&start, &end, false).to_string());
@@ -287,14 +379,18 @@ fn connect_save(state: Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
             eprintln!("warning: could not save note: {e}");
         }
         buffer.delete(&mut start, &mut end);
+        *state.last_activity.borrow_mut() = Instant::now();
         refresh(&state);
     });
 }
 
-fn connect_search(state: Rc<App>) {
-    let search_state = Rc::clone(&state);
+fn connect_search(state: &Rc<App>) {
+    let weak: Weak<App> = Rc::downgrade(state);
     state.search_entry.connect_search_changed(move |_| {
-        refresh(&search_state);
+        if let Some(state) = weak.upgrade() {
+            *state.last_activity.borrow_mut() = Instant::now();
+            refresh(&state);
+        }
     });
 }
 
@@ -319,14 +415,6 @@ fn clear_rows(state: &Rc<App>) {
 }
 
 fn append_note_row(state: &Rc<App>, id: &str) {
-    let display = Zeroizing::new(
-        state
-            .store
-            .borrow()
-            .get(id)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|_| "<unreadable note>".to_string()),
-    );
     let label = gtk::Label::new(None);
     label.set_wrap(true);
     label.set_xalign(0.0);
@@ -334,17 +422,84 @@ fn append_note_row(state: &Rc<App>, id: &str) {
     label.set_margin_bottom(8);
     label.set_margin_start(12);
     label.set_margin_end(12);
-    label.set_text(&display);
+    label.set_text(MASKED_LABEL);
+
+    let reveal_btn = gtk::Button::new();
+    reveal_btn.set_icon_name("eye-open-symbolic");
+    reveal_btn.set_valign(gtk::Align::Center);
+    reveal_btn.add_css_class("flat");
+
+    let delete_btn = gtk::Button::new();
+    delete_btn.set_icon_name("user-trash-symbolic");
+    delete_btn.set_valign(gtk::Align::Center);
+    delete_btn.add_css_class("flat");
+
+    let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    label.set_hexpand(true);
+    row_box.append(&label);
+    row_box.append(&reveal_btn);
+    row_box.append(&delete_btn);
+
     let row = gtk::ListBoxRow::new();
-    row.set_child(Some(&label));
-    connect_delete_on_click(state.clone(), &row, id);
+    row.set_child(Some(&row_box));
+    connect_reveal(state.clone(), &reveal_btn, &label, id);
+    connect_delete(state.clone(), &delete_btn, id);
     state.notes_box.append(&row);
 }
 
-fn connect_delete_on_click(state: Rc<App>, row: &gtk::ListBoxRow, id: &str) {
+fn connect_reveal(state: Rc<App>, reveal_btn: &gtk::Button, label: &gtk::Label, id: &str) {
+    let weak: Weak<App> = Rc::downgrade(&state);
+    let label = label.clone();
     let id = id.to_string();
-    row.connect_activate(move |_row| {
-        state.store.borrow_mut().delete(&id);
-        refresh(&state);
+    let revealed = std::cell::Cell::new(false);
+    reveal_btn.connect_clicked(move |btn| {
+        let Some(state) = weak.upgrade() else { return };
+        *state.last_activity.borrow_mut() = Instant::now();
+        if revealed.get() {
+            label.set_text(MASKED_LABEL);
+            btn.set_icon_name("eye-open-symbolic");
+            revealed.set(false);
+        } else {
+            let display = state
+                .store
+                .borrow()
+                .get(&id)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| "<unreadable note>".to_string());
+            label.set_text(&display);
+            btn.set_icon_name("eye-shut-symbolic");
+            revealed.set(true);
+        }
+    });
+}
+
+fn connect_delete(state: Rc<App>, delete_btn: &gtk::Button, id: &str) {
+    let weak: Weak<App> = Rc::downgrade(&state);
+    let id = id.to_string();
+    delete_btn.connect_clicked(move |_btn| {
+        let Some(state) = weak.upgrade() else { return };
+        let dialog = gtk::AlertDialog::builder()
+            .message("Delete this note?")
+            .detail("This cannot be undone.")
+            .buttons(vec!["Cancel".to_string(), "Delete".to_string()])
+            .default_button(1)
+            .cancel_button(0)
+            .modal(true)
+            .build();
+        let weak = weak.clone();
+        let id = id.clone();
+        let parent = state.window.borrow().clone();
+        dialog.choose(
+            parent.as_ref(),
+            gtk::gio::Cancellable::NONE,
+            move |response| {
+                if response == Ok(1) {
+                    if let Some(state) = weak.upgrade() {
+                        state.store.borrow_mut().delete(&id);
+                        refresh(&state);
+                    }
+                }
+            },
+        );
     });
 }

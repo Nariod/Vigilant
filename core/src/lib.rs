@@ -33,7 +33,9 @@ impl Drop for SealedNote {
 impl NoteStore {
     pub fn new() -> Self {
         let mut key_bytes = [0u8; 32];
-        SysRng.try_fill_bytes(&mut key_bytes).expect("system RNG failure");
+        SysRng
+            .try_fill_bytes(&mut key_bytes)
+            .expect("system RNG failure");
         let key = Key::from(key_bytes);
         key_bytes.zeroize();
         Self {
@@ -44,7 +46,9 @@ impl NoteStore {
 
     fn seal(&self, plaintext: &str) -> Result<SealedNote, StoreError> {
         let mut nonce_bytes = [0u8; 12];
-        SysRng.try_fill_bytes(&mut nonce_bytes).expect("system RNG failure");
+        SysRng
+            .try_fill_bytes(&mut nonce_bytes)
+            .expect("system RNG failure");
         let nonce = Nonce::from(nonce_bytes);
         let ct = self
             .cipher
@@ -81,7 +85,8 @@ impl NoteStore {
         }
     }
 
-    /// Create or overwrite a note. The plaintext buffer is zeroized after sealing.
+    /// Create or overwrite a note. The caller is responsible for zeroizing
+    /// its own copy of the plaintext; this function only seals what it is given.
     pub fn put(&mut self, id: &str, content: &str) -> Result<(), StoreError> {
         let sealed = self.seal(content)?;
         self.sealed.insert(id.to_string(), sealed);
