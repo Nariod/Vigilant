@@ -4,13 +4,46 @@
 
 ## Security model
 
-- **No disk writes**: notes live exclusively in memory (RAM).
-- **ChaCha20-Poly1305 encryption**: every note is sealed under a random session key that is never persisted.
-- **Locked memory** (`mlockall`): process pages cannot be swapped out, including the session key.
-- **Single session**: when the application closes, everything is destroyed — keys and plaintext are *zeroized*.
-- **Core dumps disabled** (`RLIMIT_CORE=0`): no core file can be written on a crash.
-- **Flatpak sandbox without persistent disk access**: no filesystem access outside `/app` and XDG config.
-- **GTK4 / libadwaita UI**, native GNOME, Flatpak-ready.
+What Vigilant actually guarantees:
+
+- **No disk writes by the app itself**: notes live only in process memory,
+  sealed with **ChaCha20-Poly1305** under a random session key that is never
+  persisted.
+- **Zeroized cryptography**: the cipher key material is zeroized on drop
+  (`chacha20poly1305` built with the `zeroize` feature) and plaintext buffers
+  handled in Rust are zeroized after use.
+- **Explicit shutdown wipe**: on window close the store, the search field, the
+  input field and the session clipboards are cleared, instead of relying on
+  process teardown.
+- **Non-dumpable process** (`prctl(PR_SET_DUMPABLE, 0)` plus `RLIMIT_CORE=0`):
+  other processes of the same user cannot read this process's memory through
+  `/proc/<pid>/mem`, `ptrace` or core dumps.
+- **Notes are masked by default** and only decrypted into a label when you
+  explicitly reveal them, one note at a time.
+- **Private input**: input fields set `GTK_INPUT_HINT_PRIVATE` /
+  `NO_SPELLCHECK`, and undo history is disabled on the note input.
+- **GTK4 / libadwaita UI**, native GNOME, Flatpak-only distribution.
+
+What Vigilant **cannot** guarantee (documented residual risks):
+
+- **GTK makes its own plaintext copies.** A revealed note is copied by GTK and
+  Pango (label text, Pango layout, accessibility tree) and freed without
+  zeroization. Reveal notes sparingly.
+- **Accessibility bus**: revealed text is exposed to AT-SPI clients of the
+  session, like in any GTK application.
+- **Clipboard managers**: copying a revealed note hands it to the session's
+  clipboard history (GNOME extensions, CopyQ, Klipper), which may persist it on
+  disk. Vigilant clears its clipboards on close but cannot recall what a
+  clipboard manager already stored.
+- **Swap / hibernation**: `mlockall` is attempted but usually fails under
+  Flatpak because of the memlock limit; a banner is shown when it fails. If
+  your machine hibernates, the RAM image — including plaintext — hits the
+  disk. Disable hibernation or use encrypted swap.
+- **Screenshots, screen sharing, shoulder-surfing**: notes are masked by
+  default, but a revealed note is on screen.
+- **Flatpak always provides a writable `~/.var/app/<id>/`**: the app never
+  writes there, but the sandbox itself is not disk-less.
+- For kernel-level hardening, consider `init_on_free=1` and encrypted swap.
 
 ### Automatic wiping (optional, off by default)
 
@@ -18,8 +51,13 @@ The in-app ⚙ menu provides:
 
 - an "Automatic note wiping" toggle (off by default; the window can stay
   open all day without wiping anything);
-- an adjustable delay from 1 to 480 minutes (10 by default);
+- an adjustable **idle** delay from 1 to 480 minutes (10 by default):
+  notes, the search field and the input field are erased after that much
+  inactivity;
 - an "Erase all notes now" button.
+
+Note deletion always asks for confirmation and cannot be triggered by a
+single accidental click.
 
 ### Memory locking: system prerequisites
 
@@ -43,16 +81,16 @@ sudo systemctl edit --user   # or edit /etc/systemd/system.conf.d/
 DefaultLimitMEMLOCK=infinity
 ```
 
-Then log back in. Without this, Vigilant prints a warning at startup and
-in-memory encryption remains the only protection against swap forensics.
+Then log back in. Without this, Vigilant shows a warning banner in the
+window (and on stderr when run from a terminal) and in-memory encryption
+remains the only protection against swap forensics.
 
-### Swap: data stays encrypted
+### Swap
 
-Note content is encrypted in memory (ChaCha20-Poly1305, session key never
-persisted). If the kernel swaps process pages out, they never leave RAM in
-plaintext: process pages are locked by `mlockall`, including the session key.
-If locking fails (reported on stderr), in-memory encryption remains the
-second line of defense.
+If `mlockall` fails, plaintext pages can be swapped out. Notes are stored
+encrypted, but anything currently revealed in the UI exists in plaintext in
+process memory. Use encrypted swap and disable hibernation for a hardened
+setup.
 
 ### Screenshots: known limitation
 
