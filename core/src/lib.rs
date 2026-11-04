@@ -14,6 +14,9 @@ use std::collections::HashMap;
 use std::fmt;
 use zeroize::{Zeroize, Zeroizing};
 
+/// Maximum note size in bytes (1 MiB). Bounds memory use under `mlockall`.
+pub const MAX_NOTE_BYTES: usize = 1 << 20;
+
 pub struct NoteStore {
     cipher: ChaCha20Poly1305,
     sealed: HashMap<String, SealedNote>,
@@ -31,31 +34,39 @@ impl Drop for SealedNote {
 }
 
 impl NoteStore {
-    pub fn new() -> Self {
+    /// Fallible constructor: an RNG failure is reported as an error, never a
+    /// panic, so it is safe to call from inside a GTK callback (a panic there
+    /// would abort across the FFI boundary).
+    pub fn try_new() -> Result<Self, StoreError> {
         let mut key_bytes = [0u8; 32];
         SysRng
             .try_fill_bytes(&mut key_bytes)
-            .expect("system RNG failure");
+            .map_err(|_| StoreError::Seal)?;
         let key = Key::from(key_bytes);
         key_bytes.zeroize();
-        Self {
+        Ok(Self {
             cipher: ChaCha20Poly1305::new(&key),
             sealed: HashMap::new(),
-        }
+        })
+    }
+
+    pub fn new() -> Self {
+        Self::try_new().expect("system RNG failure")
     }
 
     fn seal(&self, plaintext: &str) -> Result<SealedNote, StoreError> {
         let mut nonce_bytes = [0u8; 12];
         SysRng
             .try_fill_bytes(&mut nonce_bytes)
-            .expect("system RNG failure");
+            .map_err(|_| StoreError::Seal)?;
         let nonce = Nonce::from(nonce_bytes);
-        let ct = self
+        let mut ct = self
             .cipher
             .encrypt(&nonce, plaintext.as_bytes())
             .map_err(|_| StoreError::Seal)?;
         let mut sealed_ct = nonce_bytes.to_vec();
         sealed_ct.extend_from_slice(&ct);
+        ct.zeroize();
         Ok(SealedNote {
             ct: sealed_ct,
             created: std::time::SystemTime::now()
@@ -88,6 +99,9 @@ impl NoteStore {
     /// Create or overwrite a note. The caller is responsible for zeroizing
     /// its own copy of the plaintext; this function only seals what it is given.
     pub fn put(&mut self, id: &str, content: &str) -> Result<(), StoreError> {
+        if content.len() > MAX_NOTE_BYTES {
+            return Err(StoreError::TooLarge);
+        }
         let sealed = self.seal(content)?;
         self.sealed.insert(id.to_string(), sealed);
         Ok(())
@@ -160,6 +174,7 @@ pub enum StoreError {
     NotFound,
     Seal,
     Corrupt,
+    TooLarge,
 }
 
 impl fmt::Display for StoreError {
@@ -168,6 +183,7 @@ impl fmt::Display for StoreError {
             Self::NotFound => write!(f, "note not found"),
             Self::Seal => write!(f, "failed to seal note"),
             Self::Corrupt => write!(f, "note is corrupt or tampered"),
+            Self::TooLarge => write!(f, "note exceeds the maximum size"),
         }
     }
 }
@@ -236,6 +252,19 @@ mod tests {
         store.put("a", "x").unwrap();
         store.put("b", "y").unwrap();
         assert_eq!(store.search("").len(), 2);
+    }
+
+    #[test]
+    fn try_new_succeeds() {
+        assert!(NoteStore::try_new().is_ok());
+    }
+
+    #[test]
+    fn oversized_note_rejected() {
+        let mut store = NoteStore::new();
+        let big = "x".repeat(MAX_NOTE_BYTES + 1);
+        assert_eq!(store.put("a", &big), Err(StoreError::TooLarge));
+        assert!(store.is_empty());
     }
 
     #[test]

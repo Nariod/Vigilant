@@ -34,9 +34,22 @@ struct App {
 fn main() -> glib::ExitCode {
     disable_core_dumps();
     set_non_dumpable();
+    std::env::set_var("NO_AT_BRIDGE", "1");
     let memory_locked = lock_memory();
+    let store = match vigilant_core::NoteStore::try_new() {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("fatal: could not initialize the encrypted note store: {e}");
+            return glib::ExitCode::FAILURE;
+        }
+    };
+    let pending_store = std::cell::RefCell::new(Some(store));
     let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(move |app| build_ui(app, memory_locked));
+    app.connect_activate(move |app| {
+        if let Some(store) = pending_store.borrow_mut().take() {
+            build_ui(app, memory_locked, store);
+        }
+    });
     app.run()
 }
 
@@ -97,8 +110,8 @@ fn raise_memlock_limit() {
         eprintln!("warning: could not read RLIMIT_MEMLOCK");
         return;
     }
-    if limit.rlim_max == libc::RLIM_INFINITY {
-        limit.rlim_cur = libc::RLIM_INFINITY;
+    if limit.rlim_cur < limit.rlim_max {
+        limit.rlim_cur = limit.rlim_max;
         if !set_memlock(&limit) {
             eprintln!("warning: could not raise RLIMIT_MEMLOCK");
         }
@@ -113,7 +126,7 @@ fn private_input_hints() -> gtk::InputHints {
     gtk::InputHints::PRIVATE | gtk::InputHints::NO_SPELLCHECK
 }
 
-fn build_ui(app: &adw::Application, memory_locked: bool) {
+fn build_ui(app: &adw::Application, memory_locked: bool, store: vigilant_core::NoteStore) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .default_width(480)
@@ -122,7 +135,7 @@ fn build_ui(app: &adw::Application, memory_locked: bool) {
         .build();
 
     let state = Rc::new(App {
-        store: RefCell::new(vigilant_core::NoteStore::new()),
+        store: RefCell::new(store),
         window: RefCell::new(None),
         search_entry: gtk::SearchEntry::new(),
         input_buffer: RefCell::new(None),
@@ -202,7 +215,9 @@ fn build_ui(app: &adw::Application, memory_locked: bool) {
     build_settings_popover(&state, &settings_btn);
     connect_save(&state, &save_btn, input.clone());
     *state.input_buffer.borrow_mut() = Some(input.buffer());
+    connect_input_activity(&state);
     connect_search(&state);
+    connect_focus_mask(&state, &window);
     connect_close(&state, &window);
 
     refresh(&state);
@@ -334,6 +349,7 @@ fn cancel_auto_wipe(state: &Rc<App>) {
 
 fn wipe_everything(state: &Rc<App>) {
     state.store.borrow_mut().clear();
+    clear_rows(state);
     state.search_entry.set_text("");
     if let Some(buffer) = state.input_buffer.borrow().as_ref() {
         buffer.set_text("");
@@ -354,9 +370,11 @@ fn clear_clipboards() {
 }
 
 fn connect_close(state: &Rc<App>, window: &adw::ApplicationWindow) {
-    let holder = Rc::clone(state);
+    let weak = Rc::downgrade(state);
     window.connect_close_request(move |_| {
-        full_shutdown_wipe(&holder);
+        if let Some(state) = weak.upgrade() {
+            full_shutdown_wipe(&state);
+        }
         glib::Propagation::Proceed
     });
 }
@@ -373,12 +391,37 @@ fn connect_save(state: &Rc<App>, save_btn: &gtk::Button, input: gtk::TextView) {
         }
         let id = format!("n-{}", state.next_id.get());
         state.next_id.set(state.next_id.get().saturating_add(1));
-        if let Err(e) = state.store.borrow_mut().put(&id, &text) {
-            eprintln!("warning: could not save note: {e}");
+        *state.last_activity.borrow_mut() = Instant::now();
+        let result = state.store.borrow_mut().put(&id, &text);
+        if let Err(e) = result {
+            eprintln!("warning: could not save note, text kept in the input field: {e}");
+            return;
         }
         buffer.delete(&mut start, &mut end);
-        *state.last_activity.borrow_mut() = Instant::now();
         refresh(&state);
+    });
+}
+
+fn connect_input_activity(state: &Rc<App>) {
+    let weak: Weak<App> = Rc::downgrade(state);
+    if let Some(buffer) = state.input_buffer.borrow().as_ref() {
+        buffer.connect_changed(move |_| {
+            if let Some(state) = weak.upgrade() {
+                *state.last_activity.borrow_mut() = Instant::now();
+            }
+        });
+    }
+}
+
+fn connect_focus_mask(state: &Rc<App>, window: &adw::ApplicationWindow) {
+    let weak: Weak<App> = Rc::downgrade(state);
+    window.connect_is_active_notify(move |window| {
+        if window.is_active() {
+            return;
+        }
+        if let Some(state) = weak.upgrade() {
+            refresh(&state);
+        }
     });
 }
 
@@ -394,7 +437,7 @@ fn connect_search(state: &Rc<App>) {
 
 fn refresh(state: &Rc<App>) {
     clear_rows(state);
-    let query = state.search_entry.text().to_string();
+    let query = Zeroizing::new(state.search_entry.text().to_string());
     let ids = state.store.borrow().search(&query);
     if ids.is_empty() {
         state.stack.set_visible_child(&state.empty_label);
@@ -458,13 +501,11 @@ fn connect_reveal(state: Rc<App>, reveal_btn: &gtk::Button, label: &gtk::Label, 
             btn.set_icon_name("eye-open-symbolic");
             revealed.set(false);
         } else {
-            let display = state
-                .store
-                .borrow()
-                .get(&id)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|_| "<unreadable note>".to_string());
-            label.set_text(&display);
+            let note = state.store.borrow().get(&id);
+            match note {
+                Ok(text) => label.set_text(&text),
+                Err(_) => label.set_text("<unreadable note>"),
+            }
             btn.set_icon_name("eye-shut-symbolic");
             revealed.set(true);
         }
@@ -480,7 +521,7 @@ fn connect_delete(state: Rc<App>, delete_btn: &gtk::Button, id: &str) {
             .message("Delete this note?")
             .detail("This cannot be undone.")
             .buttons(vec!["Cancel".to_string(), "Delete".to_string()])
-            .default_button(1)
+            .default_button(0)
             .cancel_button(0)
             .modal(true)
             .build();
