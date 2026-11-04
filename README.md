@@ -12,9 +12,9 @@ What Vigilant actually guarantees:
 - **Zeroized cryptography**: the cipher key material is zeroized on drop
   (`chacha20poly1305` built with the `zeroize` feature) and plaintext buffers
   handled in Rust are zeroized after use.
-- **Explicit shutdown wipe**: on window close the store, the search field, the
-  input field and the session clipboards are cleared, instead of relying on
-  process teardown.
+- **Explicit shutdown wipe**: on window close the store, the note list, the
+  search field, the input field and the session clipboards are cleared, instead
+  of relying on process teardown.
 - **Non-dumpable process** (`prctl(PR_SET_DUMPABLE, 0)` plus `RLIMIT_CORE=0`):
   other processes of the same user cannot read this process's memory through
   `/proc/<pid>/mem`, `ptrace` or core dumps.
@@ -117,9 +117,11 @@ limitation.
 ## Project structure
 
 ```
-core/   Core library: NoteStore (encryption, memory, zeroize) + tests
-app/    GTK4/libadwaita binary (UI)
-data/   desktop file, AppStream metainfo, icon
+core/    Core library: NoteStore (encryption, memory, zeroize) + tests
+app/     GTK4/libadwaita binary (UI)
+data/    desktop file, AppStream metainfo, icon
+vendor/  Vendored crate sources (offline builds; see .cargo/config.toml)
+.cargo/  Cargo source replacement pointing crates.io at vendor/
 io.github.nariod.Vigilant.yml   Flatpak manifest
 ```
 
@@ -149,6 +151,10 @@ cargo build                      # debug build
 cargo run -p vigilant            # run the app (requires gtk4 + libadwaita)
 cargo build --release            # optimized binary in target/release/vigilant
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every push/PR: vendor/lockfile sync
+check, core tests, clippy `-D warnings` on both crates, `cargo fmt --check`,
+`cargo audit`, a `cargo check` of the app and a full Flatpak build.
 
 If you change any dependency in `Cargo.toml`, you **must re-vendor**:
 
@@ -246,4 +252,4 @@ The required SDK is `org.gnome.Sdk` (runtime `org.gnome.Platform`).
 The application is not intended to be distributed outside Flatpak. To publish
 on Flathub, the `io.github.nariod.Vigilant.yml` manifest follows the
 flatpak-builder format and can be adapted to point at a git tag instead of
-`type: dir`.
+`branch: main`.
