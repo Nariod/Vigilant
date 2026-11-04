@@ -24,6 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p vigilant-core
       - run: cargo clippy -p vigilant-core -- -D warnings
+      - run: cargo fmt --all -- --check
   app-check:
     runs-on: ubuntu-latest
     steps:
@@ -32,6 +33,14 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
       - run: cargo check -p vigilant
+      - run: cargo clippy -p vigilant -- -D warnings
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
 
   flatpak:
     runs-on: ubuntu-latest

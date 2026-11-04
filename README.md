@@ -12,14 +12,23 @@ What Vigilant actually guarantees:
 - **Zeroized cryptography**: the cipher key material is zeroized on drop
   (`chacha20poly1305` built with the `zeroize` feature) and plaintext buffers
   handled in Rust are zeroized after use.
-- **Explicit shutdown wipe**: on window close the store, the search field, the
-  input field and the session clipboards are cleared, instead of relying on
-  process teardown.
+- **Explicit shutdown wipe**: on window close the store, the note list, the
+  search field, the input field and the session clipboards are cleared, instead
+  of relying on process teardown.
 - **Non-dumpable process** (`prctl(PR_SET_DUMPABLE, 0)` plus `RLIMIT_CORE=0`):
   other processes of the same user cannot read this process's memory through
   `/proc/<pid>/mem`, `ptrace` or core dumps.
 - **Notes are masked by default** and only decrypted into a label when you
-  explicitly reveal them, one note at a time.
+  explicitly reveal them, one note at a time. Revealed notes are **masked
+  again automatically as soon as the window loses focus**.
+- **Accessibility bridge disabled**: `NO_AT_BRIDGE=1` is set before GTK
+  initializes, so revealed text is not exposed to AT-SPI clients.
+- **Bounded note size**: notes larger than 1 MiB are rejected
+  (`StoreError::TooLarge`), keeping allocations safe under `mlockall`.
+- **No panics on the crypto path**: an RNG failure aborts startup cleanly
+  (exit code 1) or fails the save with an error, never panics inside a GTK
+  callback (a panic there would abort across the FFI boundary). A failed save
+  keeps the text in the input field instead of dropping it.
 - **Private input**: input fields set `GTK_INPUT_HINT_PRIVATE` /
   `NO_SPELLCHECK`, and undo history is disabled on the note input.
 - **GTK4 / libadwaita UI**, native GNOME, Flatpak-only distribution.
@@ -29,8 +38,10 @@ What Vigilant **cannot** guarantee (documented residual risks):
 - **GTK makes its own plaintext copies.** A revealed note is copied by GTK and
   Pango (label text, Pango layout, accessibility tree) and freed without
   zeroization. Reveal notes sparingly.
-- **Accessibility bus**: revealed text is exposed to AT-SPI clients of the
-  session, like in any GTK application.
+- **Accessibility**: the AT-SPI bridge is disabled (`NO_AT_BRIDGE=1`), so
+  screen readers cannot read Vigilant's UI — a deliberate trade-off.
+- **No authentication**: anyone with access to the running session can reveal
+  a note; Vigilant has no master password by design.
 - **Clipboard managers**: copying a revealed note hands it to the session's
   clipboard history (GNOME extensions, CopyQ, Klipper), which may persist it on
   disk. Vigilant clears its clipboards on close but cannot recall what a
@@ -38,7 +49,10 @@ What Vigilant **cannot** guarantee (documented residual risks):
 - **Swap / hibernation**: `mlockall` is attempted but usually fails under
   Flatpak because of the memlock limit; a banner is shown when it fails. If
   your machine hibernates, the RAM image — including plaintext — hits the
-  disk. Disable hibernation or use encrypted swap.
+  disk. Disable hibernation or use encrypted swap. Conversely, with an
+  unlimited `RLIMIT_MEMLOCK` (see below) no page can be swapped, and under
+  heavy memory pressure the process may be OOM-killed instead — the intended
+  trade-off.
 - **Screenshots, screen sharing, shoulder-surfing**: notes are masked by
   default, but a revealed note is on screen.
 - **Flatpak always provides a writable `~/.var/app/<id>/`**: the app never
@@ -53,11 +67,12 @@ The in-app ⚙ menu provides:
   open all day without wiping anything);
 - an adjustable **idle** delay from 1 to 480 minutes (10 by default):
   notes, the search field and the input field are erased after that much
-  inactivity;
+  inactivity (typing in the input field counts as activity, so an unfinished
+  note is never wiped mid-typing);
 - an "Erase all notes now" button.
 
-Note deletion always asks for confirmation and cannot be triggered by a
-single accidental click.
+Note deletion always asks for confirmation, cannot be triggered by a single
+accidental click, and the dialog's default (Enter) button is **Cancel**.
 
 ### Memory locking: system prerequisites
 
@@ -102,9 +117,11 @@ limitation.
 ## Project structure
 
 ```
-core/   Core library: NoteStore (encryption, memory, zeroize) + tests
-app/    GTK4/libadwaita binary (UI)
-data/   desktop file, AppStream metainfo, icon
+core/    Core library: NoteStore (encryption, memory, zeroize) + tests
+app/     GTK4/libadwaita binary (UI)
+data/    desktop file, AppStream metainfo, icon
+vendor/  Vendored crate sources (offline builds; see .cargo/config.toml)
+.cargo/  Cargo source replacement pointing crates.io at vendor/
 io.github.nariod.Vigilant.yml   Flatpak manifest
 ```
 
@@ -128,12 +145,16 @@ The workspace uses vendored dependencies (`.cargo/config.toml` redirects
 `crates.io` to `vendor/`), so most commands work fully offline:
 
 ```bash
-cargo test -p vigilant-core      # core library tests (8 tests)
+cargo test -p vigilant-core      # core library tests (10 tests)
 cargo check --workspace          # type-check everything
 cargo build                      # debug build
 cargo run -p vigilant            # run the app (requires gtk4 + libadwaita)
 cargo build --release            # optimized binary in target/release/vigilant
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every push/PR: vendor/lockfile sync
+check, core tests, clippy `-D warnings` on both crates, `cargo fmt --check`,
+`cargo audit`, a `cargo check` of the app and a full Flatpak build.
 
 If you change any dependency in `Cargo.toml`, you **must re-vendor**:
 
@@ -231,4 +252,4 @@ The required SDK is `org.gnome.Sdk` (runtime `org.gnome.Platform`).
 The application is not intended to be distributed outside Flatpak. To publish
 on Flathub, the `io.github.nariod.Vigilant.yml` manifest follows the
 flatpak-builder format and can be adapted to point at a git tag instead of
-`type: dir`.
+`branch: main`.
